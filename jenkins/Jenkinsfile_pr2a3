@@ -5,7 +5,7 @@ pipeline {
         stage('Get Code') {
             steps {
                 echo 'Download git repository'
-                git branch: 'master', url: 'https://github.com/macunagutierrez/practica1b.git'
+                git branch: 'feature_fix_coverage', url: 'https://github.com/macunagutierrez/practica1b.git'
                 echo WORKSPACE
                 bat 'dir'
                 stash includes: '/**', name:'gitrepo'
