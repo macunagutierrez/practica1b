@@ -1,0 +1,129 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Get Code') {
+            steps {
+                echo 'Download git repository'
+                git branch: 'master', url: 'https://github.com/macunagutierrez/practica1b.git'
+                echo WORKSPACE
+                bat 'dir'
+                stash includes: '/**', name:'gitrepo'
+            }
+        }
+    stage('TESTING CODE PERFORMANCE') {
+        parallel {
+        stage('Unit') {
+                agent any
+                steps {
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        unstash 'gitrepo'
+                        bat '''
+                            whoami
+                            hostname
+                            echo ${WORKSPACE}
+                            set PYTHONPATH=%WORKSPACE%
+                            python --version
+                            python -m pytest --junitxml=result-unit.xml test/unit
+                        '''
+                        stash includes: '/**', name:'unit'
+                    }
+                }
+        }
+        stage('TEST integracion') {
+            agent any
+            steps {
+                    unstash 'gitrepo'
+                    bat '''
+                        whoami
+                        hostname
+                        echo ${WORKSPACE}
+                        set PYTHONPATH=%WORKSPACE%
+                        set FLASK_APP=app/api.py
+                        start flask run
+                        start java -jar C:\\unir\\programas\\wiremock-standalone-3.5.4.jar --port 9090 --root-dir test\\wiremock
+                    '''
+                    bat 'python -m pytest --junitxml=result-rest.xml test/rest'
+                    stash includes: '/**', name:'rest'
+            }
+        }
+        
+                    stage('STATIC') {
+                         agent any
+                            steps {
+                                unstash 'gitrepo'
+                                bat '''
+                                    whoami
+                                    hostname
+                                    echo ${WORKSPACE}
+                                    flake8 --format=pylint --exit-zero app >flake8.out
+                                '''
+                                recordIssues tools: [flake8(name: 'Flake8', pattern: 'flake8.out')], qualityGates: [[threshold:8, type: 'TOTAL', unstable: true], [threshold: 10, type: 'TOTAL', unstable: false]]
+                             }
+                    }
+                    stage('SECURITY Test') {
+                        agent any
+                        steps {
+                            unstash 'gitrepo'
+                            bat '''
+                                whoami
+                                hostname
+                                echo ${WORKSPACE}
+                                bandit --exit-zero -r . -f custom -o bandit.out --severity-level medium --msg-template "{abspath}:{line}: [{test_id}] {msg}"
+                            '''
+                            recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')], qualityGates: [[threshold:2, type: 'TOTAL', unstable: true], [threshold:4, type: 'TOTAL', unstable: false]]
+                        }
+                    }
+                    stage('PERFORMANCE') {
+                        agent any
+                        steps {
+                            unstash 'gitrepo'
+                            bat '''
+                                whoami
+                                hostname
+                                echo ${WORKSPACE}
+                            '''
+                            bat 'C:\\Users\\miguel\\Desktop\\UNIR\\programas\\apache-jmeter-5.6.3\\apache-jmeter-5.6.3\\bin\\jmeter -n -t test\\jmeter\\flask.jmx -f -l flask.jtl'
+                            perfReport sourceDataFiles: 'flask.jtl'
+                        }
+                    }
+                    stage('Coverage') {
+                        agent any
+                        steps {
+                            unstash 'gitrepo'
+                            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                                bat '''
+                                    whoami
+                                    hostname
+                                    echo ${WORKSPACE}
+                                    set PYTHONPATH=%WORKSPACE%
+                                    coverage run --branch --source=app --omit=app\\__init__.py,app\\api.py -m pytest test\\unit
+                                    coverage xml
+                                '''
+                            }
+                            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                                cobertura coberturaReportFile: 'coverage.xml', onlyStable:false, failUnstable:false, conditionalCoverageTargets:'10, 10, 10', lineCoverageTargets:'100, 85, 95'
+                            }
+                        }
+                    } 
+                  
+             }
+        }
+          stage('JUNIT') {
+                        agent any
+                        steps {
+                            unstash 'unit'
+                            unstash 'rest'
+                            junit 'result*.xml'
+                        }
+                       
+                    }
+        
+       
+    }
+     post {
+        always {
+            cleanWs()
+        }
+    }
+}
